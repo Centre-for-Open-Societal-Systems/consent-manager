@@ -3,8 +3,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+from openg2p_fastapi_common.crypto import CryptoFactory
 from openg2p_fastapi_common.service import BaseService
-from openg2p_fastapi_common.utils.crypto import build_crypto_helper
 from sqlalchemy import select
 
 from ..config import Settings
@@ -38,7 +38,7 @@ class VerificationService(BaseService):
         self.partners = PartnerService.get_component()
         # Partner consent-JWS verification via the shared fastapi-common crypto
         # helper (partner-mgmt backend fetches keys from Partner Management).
-        self.crypto_helper = build_crypto_helper(backend=_config.crypto_backend)
+        self.crypto_helper = CryptoFactory.build(backend=_config.crypto_backend)
         self.policy = PolicyService.get_component()
         self.receipts = ReceiptService.get_component()
 
