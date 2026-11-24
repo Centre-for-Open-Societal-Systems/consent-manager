@@ -8,10 +8,12 @@ from .consent import (
     ConsentArtefact,
     ConsentReceipt,
     ConsentRequest,
+    RequestMethod,
     RequestStatus,
     RevocationRecord,
 )
 from .partner import (
+    ConsentMethod,
     FetchType,
     Partner,
     PartnerPolicy,
@@ -28,8 +30,10 @@ __all__ = [
     "PolicyStatus",
     "AweProcessedEvent",
     "FetchType",
+    "ConsentMethod",
     "ConsentRequest",
     "RequestStatus",
+    "RequestMethod",
     "AuthContext",
     "ConsentArtefact",
     "ArtefactStatus",

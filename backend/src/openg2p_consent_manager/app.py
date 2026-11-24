@@ -12,6 +12,7 @@ from .controllers import (
     AweController,
     DecisionsController,
     LifecycleController,
+    OtpConsentController,
     PartnerController,
     SubjectController,
     VerificationController,
@@ -35,6 +36,8 @@ from .services import (
     ConsentService,
     CryptoService,
     LifecycleService,
+    OtpConsentService,
+    OtpService,
     PartnerService,
     PolicyService,
     ReceiptService,
@@ -57,6 +60,8 @@ class Initializer(BaseInitializer):
         VerificationService()
         ConsentService()
         LifecycleService()
+        OtpService()
+        OtpConsentService()  # depends on PartnerService, ReceiptService, PolicyService
         AweClient()
         AweWebhookService()  # depends on PartnerService
 
@@ -78,6 +83,9 @@ class Initializer(BaseInitializer):
             PartnerController().post_init()
             AweController().post_init()
             DecisionsController().post_init()
+            # Partner users (partner realm, own token check) raise OTP consent
+            # requests; the API answers 404 until the partner realm is configured.
+            OtpConsentController().post_init()
         if beneficiary:
             # BENEFICIARY api — Keycloak beneficiary realm. /my/* + origination.
             SubjectController().post_init()
@@ -141,6 +149,43 @@ class Initializer(BaseInitializer):
                     text(
                         "CREATE INDEX IF NOT EXISTS ix_partner_policies_awe_request_id "
                         "ON partner_policies (awe_request_id)"
+                    )
+                )
+                # How the subject's consent must arrive (NULL = partner_signed).
+                await conn.execute(
+                    text(
+                        "ALTER TABLE partner_policies ADD COLUMN IF NOT EXISTS "
+                        "consent_method VARCHAR(20)"
+                    )
+                )
+                # Partner-started OTP consent requests (NULL method = origination flow).
+                for column, ddl in (
+                    ("method", "VARCHAR(20)"),
+                    ("created_by", "VARCHAR(255)"),
+                    ("verification_note", "TEXT"),
+                    ("verified_at", "TIMESTAMPTZ"),
+                    ("otp_hash", "VARCHAR(128)"),
+                    ("otp_expires_at", "TIMESTAMPTZ"),
+                    ("otp_attempts", "INTEGER"),
+                    ("otp_verified_at", "TIMESTAMPTZ"),
+                    ("otp_channel", "VARCHAR(20)"),
+                    ("otp_destination", "VARCHAR(255)"),
+                    ("otp_provider", "VARCHAR(50)"),
+                    ("otp_reference", "VARCHAR(255)"),
+                    ("otp_send_count", "INTEGER"),
+                    ("otp_last_sent_at", "TIMESTAMPTZ"),
+                    ("otp_failures_total", "INTEGER"),
+                ):
+                    await conn.execute(
+                        text(
+                            f"ALTER TABLE consent_requests ADD COLUMN IF NOT EXISTS "
+                            f"{column} {ddl}"
+                        )
+                    )
+                await conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS ix_consent_requests_method "
+                        "ON consent_requests (method)"
                     )
                 )
             _logger.info("Database migration complete")

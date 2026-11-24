@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from .common import ReasonCode, SubjectId
 
@@ -42,9 +42,21 @@ class ValidateRequest(BaseModel):
     # The partner-signed consent object, as a compact JWS (header.payload.sig).
     # CM recovers the claims from the payload and verifies the signature against
     # the partner's Partner-Management key referenced by the JWS ``kid``.
-    consent_jws: str
+    # Exactly one of consent_jws / consent_id.
+    consent_jws: Optional[str] = None
+    # A consent the subject confirmed with an OTP (see the partner-started OTP
+    # API), by its ID, and the partner that obtained it (its audience) — checked
+    # against the consent.
+    consent_id: Optional[str] = None
+    consent_partner_id: Optional[str] = None
     partner_id: Optional[str] = None
     request_context: Optional[RequestContext] = None
+
+    @model_validator(mode="after")
+    def _one_consent(self):
+        if bool(self.consent_jws) == bool(self.consent_id):
+            raise ValueError("give exactly one of 'consent_jws' or 'consent_id'")
+        return self
 
 
 class DecisionLogResponse(BaseModel):

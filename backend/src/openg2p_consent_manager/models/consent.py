@@ -25,6 +25,15 @@ class RequestStatus(str, Enum):
     approved = "approved"
     denied = "denied"
     expired = "expired"
+    # An OTP request closed by the CM: out of wrong codes, or its code could not be delivered.
+    cancelled = "cancelled"
+
+
+class RequestMethod(str, Enum):
+    """How a consent request is granted. NULL (every request of the origination flow) is
+    the subject's own login; ``otp`` is raised by a partner and granted by a one-time code."""
+
+    otp = "otp"
 
 
 class ConsentRequest(BaseORMModelWithId):
@@ -41,6 +50,25 @@ class ConsentRequest(BaseORMModelWithId):
     valid_from: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     valid_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(String(20), default=RequestStatus.pending.value, index=True)
+
+    # Partner-started OTP requests only (NULL for the origination flow).
+    method: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, index=True)
+    created_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    verification_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    # The code is stored only as a salted hash. A transaction is the request itself.
+    otp_hash: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    otp_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    otp_attempts: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=0)
+    otp_verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    otp_channel: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    otp_destination: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    otp_provider: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    otp_reference: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    # Across every code issued for the request; a resend does not reset them.
+    otp_send_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=0)
+    otp_last_sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    otp_failures_total: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=0)
 
 
 class AuthContext(BaseORMModelWithId):
