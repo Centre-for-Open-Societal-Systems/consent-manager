@@ -3,6 +3,8 @@ from .awe_webhook_service import AweWebhookService, WebhookError
 from .consent_service import ConsentService
 from .crypto_service import CryptoService
 from .lifecycle_service import LifecycleError, LifecycleService
+from .otp_consent_service import OtpConsentService
+from .otp_service import OtpError, OtpService
 from .partner_service import PartnerService
 from .policy_service import PolicyResult, PolicyService
 from .receipt_service import ReceiptService
@@ -22,4 +24,7 @@ __all__ = [
     "ConsentService",
     "LifecycleService",
     "LifecycleError",
+    "OtpConsentService",
+    "OtpService",
+    "OtpError",
 ]

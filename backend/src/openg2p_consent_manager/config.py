@@ -167,3 +167,104 @@ class Settings(BaseSettings):
     awe_callback_url: str = ""
     # Reject webhooks whose signed timestamp is more than this far from now.
     awe_webhook_max_skew_sec: int = 300
+
+    # ── Partner portal: partner users (consent scenario 1) — off by default ──
+    # Partner users log in to the Keycloak `partner` realm (not the staff realm)
+    # and carry a `partner_id` claim (the partner's audience, e.g. bank-a).
+    # Empty issuer → the partner-portal API answers 404. Tokens are always
+    # signature-verified against the realm's JWKS (empty JWKS URL → derived
+    # from the issuer), independent of auth_enabled (which is for staff).
+    partner_auth_issuer: str = ""  # e.g. https://keycloak.../realms/partner
+    partner_auth_jwks_url: str = ""
+    partner_auth_audience: str = ""  # optional; empty disables the audience check
+    partner_auth_partner_claim: str = "partner_id"
+    # A partner user needs at least one of these realm/client roles.
+    partner_auth_roles: list[str] = ["PARTNER_OPERATOR", "PARTNER_ADMIN"]
+
+    # ── OTP consent: partner raises a request, the CM sends the subject a code,
+    # the partner submits it and the consent is granted (partner portal API) ──
+    otp_provider: str = "fayda"  # fayda | internal (delivered by SMS when oan_delivery_enabled)
+    otp_length: int = 6
+    otp_ttl_sec: int = 300
+    otp_max_attempts: int = 3  # wrong codes per issued code
+    # Budgets that a resend cannot reset:
+    otp_resend_cooldown_sec: int = 60  # between two codes for one request
+    otp_max_sends_per_request: int = 3  # the first code + 2 resends
+    otp_max_failures_per_request: int = 6  # wrong codes over all its codes; then cancelled
+    # Codes sent to one subject (any partner) within the window.
+    otp_subject_window_sec: int = 3600
+    otp_max_sends_per_subject: int = 10
+    # Mixed into the stored hash so a leaked row cannot be brute-forced offline.
+    # REQUIRED: no default, so no environment shares a public value. Without it
+    # no code is issued (503).
+    otp_salt: str = ""
+    otp_channel: str = "PHONE"
+    # TEST HARNESS: write each live code to the service log. Off by default;
+    # never on where real subjects exist. Without this or an SMS transport there
+    # is no way to deliver a code, so none is issued (503).
+    otp_log_codes: bool = False
+
+    # ── OTP delivery by SMS through the OAN Messaging Service ───────────────
+    # Off by default. When on (with a base URL and token), every issued code is
+    # sent as one SMS (purpose "otp", expiring with the code itself), and an
+    # issue that cannot be delivered fails visibly instead of storing the code.
+    oan_delivery_enabled: bool = False
+    oan_base_url: str = ""  # e.g. https://oan-messaging.<env>  (no path)
+    oan_token: str = ""  # caller credential from the OAN operator; secret
+    oan_ca_bundle: str = ""  # optional CA bundle path for the OAN API
+    oan_timeout_seconds: float = 5.0
+    oan_max_attempts: int = 2  # client retries, same key and body
+    # Subject -> phone resolution. "map" reads oan_otp_phone_map (dev/staging test
+    # numbers only). A production resolver (the registered phone from the
+    # beneficiary API, approved by the identity owner) replaces it; see
+    # services/otp_delivery.py.
+    oan_phone_resolver: str = "map"
+    # JSON: {"<subject_id_value>": "0900000101"}
+    oan_otp_phone_map: str = ""
+
+    @property
+    def oan_otp_phones(self) -> dict:
+        import json
+
+        raw = (self.oan_otp_phone_map or "").strip()
+        if not raw:
+            return {}
+        try:
+            parsed = json.loads(raw)
+        except ValueError:  # never log the value: it holds phones
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+
+    # ── OTP delivery by SMS straight to the 8028 gateway ────────────────────
+    # An alternative to the OAN Messaging Service for the OTP only (services/sms8028.py).
+    # Off by default. Never switch it on together with oan_delivery_enabled: the code
+    # would be sent twice, so that combination is refused (503).
+    sms8028_enabled: bool = False
+    sms8028_base_url: str = "https://8028.et:3400/sms-api/v1"
+    sms8028_client_secret: str = ""  # secret, from 8028
+    # The client certificate and key 8028 registered for us, as PEM text (or base64 of it);
+    # secrets. They are loaded from memory-only settings, never from the image.
+    sms8028_client_cert_pem: str = ""
+    sms8028_client_key_pem: str = ""
+    sms8028_timeout_seconds: float = 10.0
+    sms8028_max_attempts: int = 2  # only for "nothing reached 8028"; a written request is never repeated
+
+    @property
+    def oan_delivery_ready(self) -> bool:
+        """SMS delivery is switched on and has somewhere to send."""
+        return bool(self.oan_delivery_enabled and self.oan_base_url and self.oan_token)
+
+    @property
+    def sms8028_ready(self) -> bool:
+        """Direct 8028 delivery is switched on and has its secret, certificate and key."""
+        return bool(
+            self.sms8028_enabled
+            and self.sms8028_client_secret
+            and self.sms8028_client_cert_pem
+            and self.sms8028_client_key_pem
+        )
+
+    @property
+    def sms_delivery_ready(self) -> bool:
+        """Some SMS delivery (OAN or 8028) is on: an issued code is sent, not only logged."""
+        return bool(self.oan_delivery_ready or self.sms8028_ready)

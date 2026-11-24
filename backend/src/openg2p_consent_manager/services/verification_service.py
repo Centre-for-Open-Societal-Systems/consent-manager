@@ -12,7 +12,9 @@ from ..db import async_session
 from ..models import (
     ArtefactSource,
     ArtefactStatus,
+    AuthContext,
     ConsentArtefact,
+    ConsentReceipt,
     DecisionLog,
 )
 from ..schemas.common import ReasonCode
@@ -55,6 +57,8 @@ class VerificationService(BaseService):
         return claims, protected_header
 
     async def validate(self, parsed: ValidateRequest) -> Decision:
+        if parsed.consent_id:
+            return await self._validate_stored(parsed)
         now = datetime.now(timezone.utc)
         jws = parsed.consent_jws
         # The JWS string is itself canonical/immutable, so hash it directly.
@@ -76,6 +80,20 @@ class VerificationService(BaseService):
         # Idempotency: the same object (jti) returns its existing decision.
         existing = await self._existing_artefact(obj.jti)
         if existing is not None:
+            # A jti permitted before the partner's policy required an OTP is
+            # refused now, not replayed from the stored decision.
+            earlier = await self.partners.get_verification_material(obj.aud)
+            earlier_policy = earlier["policy"] if earlier else None
+            refused = (
+                self.policy.consent_method_refusal(earlier_policy, otp_confirmed=False)
+                if earlier_policy else None
+            )
+            if refused is not None:
+                return await self._deny(
+                    refused.reason, refused.detail, now, ctx_hash,
+                    partner_id=earlier["partner"].id, jti=obj.jti,
+                    policy_version=earlier_policy.version,
+                )
             return self._decision_from_artefact(existing, now)
 
         # 2. Known party — partner + policy (cached).
@@ -112,6 +130,14 @@ class VerificationService(BaseService):
                 "signature did not verify (or no verifying key from partner management)",
                 now, ctx_hash, partner_id=partner.id, jti=obj.jti,
                 policy_version=policy_version,
+            )
+
+        # A partner-signed consent is not enough for an "otp" binding.
+        refused = self.policy.consent_method_refusal(policy, otp_confirmed=False) if policy else None
+        if refused is not None:
+            return await self._deny(
+                refused.reason, refused.detail, now, ctx_hash, partner_id=partner.id,
+                jti=obj.jti, policy_version=policy_version,
             )
 
         # 10. Replay / freshness — issued_at within the configured window.
@@ -236,12 +262,12 @@ class VerificationService(BaseService):
     async def _deny(
         self, reason: ReasonCode, detail: Optional[str], now, ctx_hash,
         partner_id: Optional[str] = None, jti: Optional[str] = None,
-        policy_version: Optional[int] = None,
+        policy_version: Optional[int] = None, consent_id: Optional[str] = None,
     ) -> Decision:
         async with async_session()() as session:
             session.add(
                 DecisionLog(
-                    partner_id=partner_id, object_jti=jti, decision="deny",
+                    partner_id=partner_id, object_jti=jti, consent_id=consent_id, decision="deny",
                     reason_code=reason.value, detail=detail,
                     policy_version=policy_version, request_ctx_hash=ctx_hash,
                 )
@@ -249,4 +275,124 @@ class VerificationService(BaseService):
             await session.commit()
         return Decision(
             decision="deny", reason_code=reason, detail=detail, evaluated_at=now,
+        )
+
+    # ── An OTP-confirmed consent presented by its ID ─────────────────────────
+
+    async def _validate_stored(self, parsed: ValidateRequest) -> Decision:
+        """``consent_id``: a consent the subject confirmed with an OTP at the CM
+        (see the partner-started OTP API). Checks the consent's state, the
+        partner that obtained it and the subject; the scopes are narrowed to the
+        partner's CURRENT policy, and the policy's other terms apply as they are
+        now. Any other stored consent is not presentable here (unknown_consent)."""
+        from ..schemas.common import SubjectId
+
+        now = datetime.now(timezone.utc)
+        consent_id = parsed.consent_id
+        partner_aud = parsed.consent_partner_id
+        ctx_hash = sha256_hex(f"consent_id:{consent_id}:{partner_aud or ''}".encode("utf-8"))
+
+        async with async_session()() as session:
+            artefact = await session.get(ConsentArtefact, consent_id)
+            ctx = (
+                await session.get(AuthContext, artefact.auth_context_id)
+                if artefact is not None and artefact.auth_context_id
+                else None
+            )
+        if (
+            artefact is None
+            or artefact.source != ArtefactSource.originated.value
+            or ctx is None
+            or ctx.auth_method != "otp"
+        ):
+            return await self._deny(
+                ReasonCode.unknown_consent, "no OTP-confirmed consent with this consent_id",
+                now, ctx_hash,
+            )
+        log = {"partner_id": artefact.partner_id, "consent_id": artefact.id}
+        if artefact.status == ArtefactStatus.revoked.value:
+            return await self._deny(ReasonCode.revoked, "consent revoked", now, ctx_hash, **log)
+        if artefact.status == ArtefactStatus.expired.value or _aware(artefact.valid_until) < now:
+            return await self._deny(ReasonCode.expired, "consent expired", now, ctx_hash, **log)
+        if artefact.status != ArtefactStatus.active.value:
+            return await self._deny(
+                ReasonCode.unknown_consent, f"consent is '{artefact.status}'", now, ctx_hash, **log
+            )
+        if _aware(artefact.valid_from) > now:
+            return await self._deny(ReasonCode.expired, "not yet valid", now, ctx_hash, **log)
+
+        # The presenting partner must be the one the consent was given to; the
+        # partner is looked up by the consent's binding, never by the request.
+        material = (
+            await self.partners.get_verification_material(partner_aud) if partner_aud else None
+        )
+        if material is None or material["partner"].id != artefact.partner_id:
+            return await self._deny(
+                ReasonCode.partner_mismatch,
+                "consent_partner_id is not the partner the consent was given to",
+                now, ctx_hash, **log,
+            )
+        policy = material["policy"]
+        if policy is None:
+            return await self._deny(
+                ReasonCode.unknown_partner, "No active policy", now, ctx_hash, **log
+            )
+        ctx_subject = parsed.request_context.subject_id if parsed.request_context else None
+        if (
+            ctx_subject is not None
+            and ctx_subject.type == artefact.subject_id_type
+            and ctx_subject.value != artefact.subject_id_value
+        ):
+            return await self._deny(
+                ReasonCode.subject_mismatch,
+                "request_context.subject_id does not match the consent subject",
+                now, ctx_hash, **log,
+            )
+
+        # The current policy's terms apply to the stored consent as they do to a signed one.
+        refusal = self.policy.consent_method_refusal(
+            policy, otp_confirmed=True
+        ) or self.policy.terms_refusal(
+            policy, subject_id_type=artefact.subject_id_type, purpose=artefact.purpose,
+            valid_from=artefact.valid_from, valid_until=artefact.valid_until,
+        )
+        if refusal is not None:
+            return await self._deny(
+                refusal.reason, refusal.detail, now, ctx_hash,
+                policy_version=refusal.policy_version, **log,
+            )
+        effective = set(artefact.effective_data_scopes or []) & set(
+            policy.allowed_data_scopes or []
+        )
+        requested = parsed.request_context.requested_scopes if parsed.request_context else None
+        if requested:
+            effective &= set(requested)
+        if not effective:
+            return await self._deny(
+                ReasonCode.scope_exceeds_policy,
+                "no requested scope is permitted by policy", now, ctx_hash,
+                policy_version=policy.version, **log,
+            )
+
+        async with async_session()() as session:
+            receipt = (
+                await session.execute(
+                    select(ConsentReceipt).where(ConsentReceipt.consent_id == artefact.id)
+                )
+            ).scalars().first()
+            session.add(
+                DecisionLog(
+                    partner_id=artefact.partner_id, consent_id=artefact.id,
+                    decision="permit", reason_code=ReasonCode.ok.value,
+                    policy_version=policy.version, request_ctx_hash=ctx_hash,
+                )
+            )
+            await session.commit()
+        return Decision(
+            decision="permit", reason_code=ReasonCode.ok,
+            consent_id=artefact.id, receipt_id=receipt.id if receipt else None,
+            subject_id=SubjectId(type=artefact.subject_id_type, value=artefact.subject_id_value),
+            effective_data_scopes=sorted(effective),
+            valid_until=artefact.valid_until, policy_version=policy.version,
+            evaluated_at=now,
         )

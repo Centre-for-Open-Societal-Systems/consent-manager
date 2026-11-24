@@ -72,12 +72,14 @@ class LifecycleService(BaseService):
 
     async def get_request(self, request_id: str) -> Optional[ConsentRequest]:
         async with async_session()() as session:
-            return await session.get(ConsentRequest, request_id)
+            req = await session.get(ConsentRequest, request_id)
+        # A partner-started OTP request is granted by its code only, never here.
+        return None if req is not None and req.method is not None else req
 
     async def authenticate(self, request_id: str, id_token: str) -> AuthContext:
         async with async_session()() as session:
             req = await session.get(ConsentRequest, request_id)
-            if req is None:
+            if req is None or req.method is not None:  # OTP requests are not ours
                 raise LifecycleError(404, "consent request not found")
             if req.status != RequestStatus.pending.value:
                 raise LifecycleError(409, f"request is '{req.status}'")
@@ -108,7 +110,7 @@ class LifecycleService(BaseService):
     async def approve(self, request_id: str, granted_scopes: list) -> ConsentArtefact:
         async with async_session()() as session:
             req = await session.get(ConsentRequest, request_id)
-            if req is None:
+            if req is None or req.method is not None:  # OTP requests are not ours
                 raise LifecycleError(404, "consent request not found")
             if req.status != RequestStatus.pending.value:
                 raise LifecycleError(409, f"request is '{req.status}'")
@@ -158,7 +160,7 @@ class LifecycleService(BaseService):
     async def deny(self, request_id: str, reason: Optional[str]) -> ConsentRequest:
         async with async_session()() as session:
             req = await session.get(ConsentRequest, request_id)
-            if req is None:
+            if req is None or req.method is not None:  # OTP requests are not ours
                 raise LifecycleError(404, "consent request not found")
             if req.status != RequestStatus.pending.value:
                 raise LifecycleError(409, f"request is '{req.status}'")

@@ -1,7 +1,11 @@
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from ..models.partner import ConsentMethod
+
+CONSENT_METHODS = [m.value for m in ConsentMethod]
 
 
 # A "partner" here is CM's policy *binding* (PM owns the partner identity/keys).
@@ -42,6 +46,19 @@ class PolicyUpsert(BaseModel):
     fetch_type: str = "oneshot"
     max_fetch_frequency: Optional[str] = None
     data_life: Optional[str] = Field(None, examples=["P30D"])
+    # otp | partner_signed | internal. Left out, the binding keeps its current
+    # method (partner_signed for a new one), so clients that do not know the
+    # field change nothing; null resets it to partner_signed.
+    consent_method: Optional[str] = Field(None, examples=["otp"])
+
+    @field_validator("consent_method", mode="before")
+    @classmethod
+    def _consent_method(cls, value):
+        if isinstance(value, str):
+            value = value.strip().lower() or None
+        if value is not None and value not in CONSENT_METHODS:
+            raise ValueError(f"consent_method: {value!r} is not one of {CONSENT_METHODS}")
+        return value
 
 
 class PolicyResponse(PolicyUpsert):

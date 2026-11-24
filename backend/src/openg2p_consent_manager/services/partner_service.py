@@ -19,6 +19,16 @@ _config = Settings.get_config()
 _logger = logging.getLogger(_config.logging_default_logger_name)
 
 
+# Strictest first: otp needs the subject's OTP; partner_signed (also NULL)
+# accepts the partner's own signature; internal needs no subject consent.
+_CONSENT_METHOD_RANK = {"otp": 0, None: 1, "partner_signed": 1, "internal": 2}
+
+
+def _consent_method_rank(method) -> int:
+    value = getattr(method, "value", method)
+    return _CONSENT_METHOD_RANK.get(value, 3)
+
+
 class PartnerService(BaseService):
     """Partner *policy bindings* (admin) plus the cached lookups the hot path
     needs. Partner identity + keys live in Partner Management; a row here binds a
@@ -108,6 +118,14 @@ class PartnerService(BaseService):
             )
             next_version = (existing[0].version + 1) if existing else 1
 
+            # Left out of the request: keep the binding's current method, so a
+            # client that does not know the field never resets it.
+            fields_set = getattr(data, "model_fields_set", None)
+            if not hasattr(data, "consent_method") or (
+                fields_set is not None and "consent_method" not in fields_set
+            ):
+                data.consent_method = active.consent_method if active else None
+
             gated = _config.awe_enabled and self._is_widening(data, active)
 
             if gated:
@@ -133,6 +151,7 @@ class PartnerService(BaseService):
                 fetch_type=data.fetch_type,
                 max_fetch_frequency=data.max_fetch_frequency,
                 data_life=data.data_life,
+                consent_method=data.consent_method,
                 effective_from=effective_from,
             )
             session.add(policy)
@@ -251,6 +270,11 @@ class PartnerService(BaseService):
         ):
             return True
         if PartnerService._duration_loosened(data.data_life, active.data_life):
+            return True
+        # A less strict consent method (e.g. otp -> partner_signed) widens.
+        if _consent_method_rank(getattr(data, "consent_method", None)) > _consent_method_rank(
+            getattr(active, "consent_method", None)
+        ):
             return True
         return False
 

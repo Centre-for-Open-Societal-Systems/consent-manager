@@ -1,6 +1,7 @@
 from .awe_controller import AweController
 from .decisions_controller import DecisionsController
 from .lifecycle_controller import LifecycleController
+from .otp_consent_controller import OtpConsentController
 from .partner_controller import PartnerController
 from .subject_controller import SubjectController
 from .verification_controller import VerificationController
@@ -14,4 +15,5 @@ __all__ = [
     "PartnerController",
     "LifecycleController",
     "SubjectController",
+    "OtpConsentController",
 ]
