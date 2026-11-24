@@ -20,6 +20,9 @@ on:
 
 jobs:
   build-publish:
+    # Inherited from OpenG2P and switched off in this repository: its images are built and published to ECR by
+    # Jenkins (Jenkinsfile, ci/README.md). Running it here would be a second publisher under another owner.
+    if: github.repository == 'openg2p/consent-manager'
     uses: openg2p/openg2p-packaging/.github/workflows/build-publish.yml@v1
     with:
       changelog_skip_ai: ${{ inputs.changelog_skip_ai || false }}
