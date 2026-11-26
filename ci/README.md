@@ -29,7 +29,7 @@ No deploy, no Helm change, no push to oan-helm. The manifest `service-outcomes/c
 | `consent-manager-ui` | `ui/Dockerfile` | `ui` |
 | `consent-manager-sanity` | `docker/consent-manager-sanity/Dockerfile` | `.` |
 
-All three share one tag, for example `1.1.0-develop.57`: `<version>` from `init.yaml`, `develop`, the Jenkins build
+All three share one tag, for example `1.1.1-develop.57`: `<version>` from `init.yaml`, `develop`, the Jenkins build
 number. `publish_images.py` recomputes the tag from `init.yaml`, `BRANCH_NAME` and `BUILD_NUMBER` and refuses any other
 `IMAGE_TAG`; it also requires a clean work tree at `SOURCE_COMMIT`. The images carry
 `org.opencontainers.image.source` (this repository) and `org.opencontainers.image.revision` (the 40 character commit),
@@ -48,6 +48,9 @@ Evidence (read 24 November 2026):
 
 An OAN image with new behaviour must not be taken for the public `openg2p/consent-manager-*:1.0.x` images, so the line
 is a minor above them: `1.1.0`. Bump `init.yaml` for the next release; never reuse a `<version>-develop.<n>` (below).
+
+It is now `1.1.1`: the Jenkins job was recreated in another folder, which restarts the build numbers, and
+`1.1.0-develop.1` is already published.
 
 ### No `-rpVersion` suffix
 

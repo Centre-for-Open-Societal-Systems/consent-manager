@@ -1,4 +1,4 @@
 # The version of this repository's OAN builds (oan-helm docs/release/naming-standard.md, section 6).
-# Builds add -<branch>.<BUILD_NUMBER>: develop 1.1.0-develop.57. It is independent of the OpenG2P release
+# Builds add -<branch>.<BUILD_NUMBER>: develop 1.1.1-develop.57. It is independent of the OpenG2P release
 # line (the 1.0.x tags and the __version__ of the Python package); ci/README.md says why it is 1.1.0.
-version: 1.1.0
+version: 1.1.1
