@@ -21,7 +21,7 @@ import publish_images as pub  # noqa: E402
 COMMIT = "0123456789abcdef0123456789abcdef01234567"
 SOURCE = pub.SOURCE
 ACCOUNT = pub.EXPECTED_ACCOUNT
-TAG = "1.1.0-develop.7"
+TAG = "1.1.1-develop.7"
 REPOS = ["eoan/consent-manager/consent-manager-api", "eoan/consent-manager/consent-manager-ui",
          "eoan/consent-manager/consent-manager-sanity"]
 GOOD = {"imageTagMutability": "IMMUTABLE", "imageScanningConfiguration": {"scanOnPush": True},
@@ -109,8 +109,8 @@ def environment(**changes):
 class Names(unittest.TestCase):
     def test_the_standard_repository_and_tag(self):
         self.assertEqual(image_names.repository("consent-manager-api"), REPOS[0])
-        self.assertEqual(image_names.tag("develop", 57), "1.1.0-develop.57")
-        self.assertEqual(image_names.tag("PR-12", 3), "1.1.0-pr-12.3")
+        self.assertEqual(image_names.tag("develop", 57), "1.1.1-develop.57")
+        self.assertEqual(image_names.tag("PR-12", 3), "1.1.1-pr-12.3")
 
     def test_no_image_carries_a_platform_version(self):
         for name in image_names.IMAGES:
@@ -125,7 +125,7 @@ class Names(unittest.TestCase):
 
     def test_init_yaml_accepts_only_a_version(self):
         with tempfile.TemporaryDirectory() as folder:
-            for text in ("version: 1.1\n", "version: 1.1.0\nversion: 1.1.1\n", "version: 1.1.0\nrpVersion: 1\n", "nonsense\n"):
+            for text in ("version: 1.1\n", "version: 1.1.1\nversion: 1.1.1\n", "version: 1.1.1\nrpVersion: 1\n", "nonsense\n"):
                 path = Path(folder) / "init.yaml"
                 path.write_text(text)
                 with self.assertRaises(ValueError):
@@ -216,8 +216,8 @@ class Publication(unittest.TestCase):
         self.assertNotIn(SECRET, " ".join(" ".join(c) for c in cloud.calls))
 
     def test_only_develop_publishes_and_a_refusal_touches_nothing(self):
-        for env in ({"BRANCH_NAME": "feature-x", "IMAGE_TAG": "1.1.0-feature-x.7"}, {"BRANCH_NAME": "PR-4", "CHANGE_ID": "4", "IMAGE_TAG": "1.1.0-pr-4.7"},
-                    {"CHANGE_ID": "4"}, {"CHANGE_TARGET": "develop"}, {"BRANCH_NAME": "staging", "IMAGE_TAG": "1.1.0-staging.7"}):
+        for env in ({"BRANCH_NAME": "feature-x", "IMAGE_TAG": "1.1.1-feature-x.7"}, {"BRANCH_NAME": "PR-4", "CHANGE_ID": "4", "IMAGE_TAG": "1.1.1-pr-4.7"},
+                    {"CHANGE_ID": "4"}, {"CHANGE_TARGET": "develop"}, {"BRANCH_NAME": "staging", "IMAGE_TAG": "1.1.1-staging.7"}):
             cloud = Cloud()
             self.refused(cloud, "only a develop branch", **env)
             self.assertEqual(cloud.calls, [])
@@ -225,7 +225,7 @@ class Publication(unittest.TestCase):
     def test_wrong_region_account_tag_and_source_are_refused_before_ecr(self):
         self.refused(Cloud(), "AWS_REGION", AWS_REGION="us-east-1")
         self.refused(Cloud(), "AWS_REGION", AWS_REGION=None)
-        self.refused(Cloud(), "IMAGE_TAG", IMAGE_TAG="1.1.0-develop.8")
+        self.refused(Cloud(), "IMAGE_TAG", IMAGE_TAG="1.1.1-develop.8")
         self.refused(Cloud(), "IMAGE_TAG", IMAGE_TAG="latest")
         self.refused(Cloud(), "SOURCE_COMMIT", SOURCE_COMMIT="abc123")
         self.refused(Cloud(head="f" * 40), "not at SOURCE_COMMIT")
